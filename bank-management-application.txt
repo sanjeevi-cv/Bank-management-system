@@ -1,0 +1,471 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <iomanip>
+#include <ctime>
+#include <limits>
+#include <algorithm>
+
+using namespace std;
+class Transaction {
+private:
+    string type;
+    double amount;
+    double balanceAfter;
+    string timestamp;
+
+public:
+    Transaction() {}
+    Transaction(string t, double amt, double bal, string ts)
+        : type(t), amount(amt), balanceAfter(bal), timestamp(ts) {}
+
+    string getType()         const { return type; }
+    double getAmount()       const { return amount; }
+    double getBalanceAfter() const { return balanceAfter; }
+    string getTimestamp()    const { return timestamp; }
+
+    string serialize() const {
+        return type + "," + to_string(amount) + "," + to_string(balanceAfter) + "," + timestamp;
+    }
+
+    static Transaction deserialize(const string& line) {
+        stringstream ss(line);
+        string type, amtStr, balStr, ts;
+        getline(ss, type, ',');
+        getline(ss, amtStr, ',');
+        getline(ss, balStr, ',');
+        getline(ss, ts);
+        return Transaction(type, stod(amtStr), stod(balStr), ts);
+    }
+};
+
+class Account {
+protected:
+    string accountNumber;
+    string holderName;
+    double balance;
+    string accountType;
+    string pin;
+    vector<Transaction> transactions;
+
+    string getCurrentTimestamp() const {
+        time_t now = time(0);
+        char buf[20];
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        return string(buf);
+    }
+
+public:
+    Account() : balance(0.0) {}
+    Account(string accNo, string name, double bal, string type, string p)
+        : accountNumber(accNo), holderName(name), balance(bal), accountType(type), pin(p) {}
+
+    virtual ~Account() {}
+
+    string getAccountNumber() const { return accountNumber; }
+    string getHolderName()    const { return holderName; }
+    double getBalance()       const { return balance; }
+    string getAccountType()   const { return accountType; }
+    string getPin()           const { return pin; }
+    vector<Transaction>& getTransactions() { return transactions; }
+
+    bool verifyPin(const string& inputPin) const { return pin == inputPin; }
+
+    virtual bool deposit(double amount) {
+        if (amount <= 0) return false;
+        balance += amount;
+        transactions.push_back(Transaction("DEPOSIT", amount, balance, getCurrentTimestamp()));
+        return true;
+    }
+
+    virtual bool withdraw(double amount) {
+        if (amount <= 0 || amount > balance) return false;
+        balance -= amount;
+        transactions.push_back(Transaction("WITHDRAWAL", amount, balance, getCurrentTimestamp()));
+        return true;
+    }
+
+    virtual void displayInfo() const {
+        cout << "\n╔══════════════════════════════════════╗" << endl;
+        cout << "║         ACCOUNT INFORMATION          ║" << endl;
+        cout << "╠══════════════════════════════════════╣" << endl;
+        cout << "║ Account No : " << left << setw(24) << accountNumber << "║" << endl;
+        cout << "║ Name       : " << left << setw(24) << holderName   << "║" << endl;
+        cout << "║ Type       : " << left << setw(24) << accountType  << "║" << endl;
+        cout << "║ Balance    : ₹" << left << setw(23) << fixed << setprecision(2) << balance << "║" << endl;
+        cout << "╚══════════════════════════════════════╝" << endl;
+    }
+
+    void displayTransactions() const {
+        if (transactions.empty()) {
+            cout << "\n  No transactions found.\n";
+            return;
+        }
+        cout << "\n┌─────────────────────────────────────────────────────────────┐" << endl;
+        cout << "│                   TRANSACTION HISTORY                      │" << endl;
+        cout << "├────────────┬──────────────┬──────────────┬──────────────────┤" << endl;
+        cout << "│    Type    │    Amount    │   Balance    │    Timestamp     │" << endl;
+        cout << "├────────────┼──────────────┼──────────────┼──────────────────┤" << endl;
+        for (const auto& t : transactions) {
+            cout << "│ " << left << setw(10) << t.getType()
+                 << " │ ₹" << right << setw(11) << fixed << setprecision(2) << t.getAmount()
+                 << " │ ₹" << setw(11) << t.getBalanceAfter()
+                 << " │ " << setw(17) << t.getTimestamp() << "│" << endl;
+        }
+        cout << "└────────────┴──────────────┴──────────────┴──────────────────┘" << endl;
+    }
+
+    virtual string serialize() const {
+        string data = accountNumber + "|" + holderName + "|" + to_string(balance)
+                    + "|" + accountType + "|" + pin + "|" + to_string(transactions.size());
+        for (const auto& t : transactions)
+            data += "\n" + t.serialize();
+        return data;
+    }
+};
+
+class SavingsAccount : public Account {
+private:
+    double interestRate;
+    double minBalance;
+
+public:
+    SavingsAccount() : interestRate(4.0), minBalance(500.0) {}
+    SavingsAccount(string accNo, string name, double bal, string pin)
+        : Account(accNo, name, bal, "SAVINGS", pin), interestRate(4.0), minBalance(500.0) {}
+
+    bool withdraw(double amount) override {
+        if (amount <= 0) return false;
+        if (balance - amount < minBalance) {
+            cout << "  ⚠  Cannot withdraw! Minimum balance ₹" << minBalance << " must be maintained.\n";
+            return false;
+        }
+        balance -= amount;
+        transactions.push_back(Transaction("WITHDRAWAL", amount, balance, getCurrentTimestamp()));
+        return true;
+    }
+
+    void applyInterest() {
+        double interest = balance * (interestRate / 100.0);
+        balance += interest;
+        transactions.push_back(Transaction("INTEREST", interest, balance, getCurrentTimestamp()));
+        cout << "  ✓  Interest of ₹" << fixed << setprecision(2) << interest << " applied.\n";
+    }
+
+    void displayInfo() const override {
+        Account::displayInfo();
+        cout << "  Interest Rate : " << interestRate << "% per annum\n";
+        cout << "  Min Balance   : ₹" << minBalance << "\n";
+    }
+};
+
+class CurrentAccount : public Account {
+private:
+    double overdraftLimit;
+
+public:
+    CurrentAccount() : overdraftLimit(10000.0) {}
+    CurrentAccount(string accNo, string name, double bal, string pin)
+        : Account(accNo, name, bal, "CURRENT", pin), overdraftLimit(10000.0) {}
+
+    bool withdraw(double amount) override {
+        if (amount <= 0) return false;
+        if (balance - amount < -overdraftLimit) {
+            cout << "  ⚠  Overdraft limit of ₹" << overdraftLimit << " exceeded.\n";
+            return false;
+        }
+        balance -= amount;
+        transactions.push_back(Transaction("WITHDRAWAL", amount, balance, getCurrentTimestamp()));
+        return true;
+    }
+
+    void displayInfo() const override {
+        Account::displayInfo();
+        cout << "  Overdraft Limit : ₹" << overdraftLimit << "\n";
+    }
+};
+
+class Bank {
+private:
+    string bankName;
+    vector<Account*> accounts;
+    string dataFile;
+    int nextAccNumber;
+
+    string generateAccountNumber() {
+        return "ACC" + to_string(nextAccNumber++);
+    }
+
+    Account* findAccount(const string& accNo) {
+        for (auto acc : accounts)
+            if (acc->getAccountNumber() == accNo) return acc;
+        return nullptr;
+    }
+
+    void saveToFile() {
+        ofstream file(dataFile);
+        if (!file.is_open()) {
+            cout << "  ⚠  Error: Cannot open data file for saving.\n";
+            return;
+        }
+        file << nextAccNumber << "\n";
+        file << accounts.size() << "\n";
+        for (const auto& acc : accounts) {
+            file << acc->serialize() << "\n---\n";
+        }
+        file.close();
+    }
+
+    void loadFromFile() {
+        ifstream file(dataFile);
+        if (!file.is_open()) return;
+
+        file >> nextAccNumber;
+        int count;
+        file >> count;
+        file.ignore();
+
+        for (int i = 0; i < count; i++) {
+            string line, headerLine;
+            getline(file, headerLine);
+
+            stringstream ss(headerLine);
+            string accNo, name, balStr, type, pin, txCountStr;
+            getline(ss, accNo,     '|');
+            getline(ss, name,      '|');
+            getline(ss, balStr,    '|');
+            getline(ss, type,      '|');
+            getline(ss, pin,       '|');
+            getline(ss, txCountStr,'|');
+
+            double bal = stod(balStr);
+            int txCount = stoi(txCountStr);
+
+            Account* acc = nullptr;
+            if (type == "SAVINGS")
+                acc = new SavingsAccount(accNo, name, bal, pin);
+            else
+                acc = new CurrentAccount(accNo, name, bal, pin);
+
+            for (int j = 0; j < txCount; j++) {
+                string txLine;
+                getline(file, txLine);
+                acc->getTransactions().push_back(Transaction::deserialize(txLine));
+            }
+
+            accounts.push_back(acc);
+
+            string sep;
+            getline(file, sep);
+        }
+        file.close();
+    }
+
+public:
+    Bank(string name, string file) : bankName(name), dataFile(file), nextAccNumber(1001) {
+        loadFromFile();
+    }
+
+    ~Bank() {
+        saveToFile();
+        for (auto acc : accounts) delete acc;
+    }
+
+    string createAccount(string name, double initialDeposit, string type, string pin) {
+        string accNo = generateAccountNumber();
+        Account* acc = nullptr;
+        if (type == "SAVINGS")
+            acc = new SavingsAccount(accNo, name, 0, pin);
+        else
+            acc = new CurrentAccount(accNo, name, 0, pin);
+
+        acc->deposit(initialDeposit);
+        accounts.push_back(acc);
+        saveToFile();
+        return accNo;
+    }
+
+    Account* login(const string& accNo, const string& pin) {
+        Account* acc = findAccount(accNo);
+        if (!acc) return nullptr;
+        return acc->verifyPin(pin) ? acc : nullptr;
+    }
+
+    bool deleteAccount(const string& accNo, const string& pin) {
+        for (auto it = accounts.begin(); it != accounts.end(); ++it) {
+            if ((*it)->getAccountNumber() == accNo && (*it)->verifyPin(pin)) {
+                delete *it;
+                accounts.erase(it);
+                saveToFile();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    string getBankName() const { return bankName; }
+    int getTotalAccounts() const { return accounts.size(); }
+};
+
+
+void clearScreen() {
+#ifdef _WIN32
+    system("cls");
+#else
+    system("clear");
+#endif
+}
+
+void printHeader(const string& bankName) {
+    cout << "\n╔══════════════════════════════════════╗" << endl;
+    cout << "║   🏦  " << left << setw(30) << bankName << "║" << endl;
+    cout << "║        Bank Management System        ║" << endl;
+    cout << "╚══════════════════════════════════════╝" << endl;
+}
+
+void printMainMenu() {
+    cout << "\n  ┌─────────────────────────────┐" << endl;
+    cout << "  │         MAIN MENU           │" << endl;
+    cout << "  ├─────────────────────────────┤" << endl;
+    cout << "  │  1. Create New Account      │" << endl;
+    cout << "  │  2. Login to Account        │" << endl;
+    cout << "  │  3. Exit                    │" << endl;
+    cout << "  └─────────────────────────────┘" << endl;
+    cout << "  Enter choice: ";
+}
+
+void printAccountMenu() {
+    cout << "\n  ┌─────────────────────────────┐" << endl;
+    cout << "  │       ACCOUNT MENU          │" << endl;
+    cout << "  ├─────────────────────────────┤" << endl;
+    cout << "  │  1. Deposit                 │" << endl;
+    cout << "  │  2. Withdraw                │" << endl;
+    cout << "  │  3. Check Balance           │" << endl;
+    cout << "  │  4. Transaction History     │" << endl;
+    cout << "  │  5. Account Details         │" << endl;
+    cout << "  │  6. Close Account           │" << endl;
+    cout << "  │  7. Logout                  │" << endl;
+    cout << "  └─────────────────────────────┘" << endl;
+    cout << "  Enter choice: ";
+}
+
+double getValidAmount(const string& prompt) {
+    double amount;
+    while (true) {
+        cout << "  " << prompt;
+        cin >> amount;
+        if (cin.fail() || amount <= 0) {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "  ⚠  Invalid amount. Please enter a positive number.\n";
+        } else {
+            cin.ignore();
+            return amount;
+        }
+    }
+}
+
+int main() {
+    Bank bank("SecureBank Ltd.", "bank_data.txt");
+    int mainChoice;
+
+    while (true) {
+        printHeader(bank.getBankName());
+        printMainMenu();
+        cin >> mainChoice;
+        cin.ignore();
+
+        if (mainChoice == 1) {
+            string name, type, pin;
+            double deposit;
+
+            cout << "\n  ─── Open New Account ───\n";
+            cout << "  Full Name        : "; getline(cin, name);
+            cout << "  Account Type (SAVINGS / CURRENT): "; getline(cin, type);
+            for (auto& c : type) c = toupper(c);
+            if (type != "SAVINGS" && type != "CURRENT") {
+                cout << "  ⚠  Invalid type. Defaulting to SAVINGS.\n";
+                type = "SAVINGS";
+            }
+            deposit = getValidAmount("Initial Deposit (₹): ");
+            cout << "  Set 4-digit PIN  : "; getline(cin, pin);
+
+            string accNo = bank.createAccount(name, deposit, type, pin);
+            cout << "\n  ✓  Account created successfully!" << endl;
+            cout << "  ✓  Your Account Number: " << accNo << endl;
+            cout << "  ✓  Keep your PIN safe!\n";
+
+        } else if (mainChoice == 2) {
+            // ─── Login ───
+            string accNo, pin;
+            cout << "\n  ─── Account Login ───\n";
+            cout << "  Account Number : "; getline(cin, accNo);
+            cout << "  PIN            : "; getline(cin, pin);
+
+            Account* acc = bank.login(accNo, pin);
+            if (!acc) {
+                cout << "  ✗  Invalid account number or PIN.\n";
+                continue;
+            }
+
+            cout << "\n  ✓  Welcome, " << acc->getHolderName() << "!\n";
+            int accChoice;
+
+            while (true) {
+                printAccountMenu();
+                cin >> accChoice;
+                cin.ignore();
+
+                if (accChoice == 1) {
+                    double amount = getValidAmount("Deposit Amount (₹): ");
+                    if (acc->deposit(amount))
+                        cout << "  ✓  ₹" << fixed << setprecision(2) << amount << " deposited. New balance: ₹" << acc->getBalance() << "\n";
+                    else
+                        cout << "  ✗  Deposit failed.\n";
+                    bank.login(accNo, pin); // refresh
+                                    } else if (accChoice == 2) {
+                    double amount = getValidAmount("Withdraw Amount (₹): ");
+                    if (acc->withdraw(amount))
+                        cout << "  ✓  ₹" << fixed << setprecision(2) << amount << " withdrawn. New balance: ₹" << acc->getBalance() << "\n";
+                    else
+                        cout << "  ✗  Withdrawal failed.\n";
+
+                } else if (accChoice == 3) {
+                    cout << "\n  Current Balance: ₹" << fixed << setprecision(2) << acc->getBalance() << "\n";
+
+                } else if (accChoice == 4) {
+                    acc->displayTransactions();
+
+                } else if (accChoice == 5) {
+                    acc->displayInfo();
+
+                } else if (accChoice == 6) {
+                    string confirmPin;
+                    cout << "  Confirm PIN to close account: "; getline(cin, confirmPin);
+                    if (bank.deleteAccount(accNo, confirmPin)) {
+                        cout << "  ✓  Account closed successfully.\n";
+                        break;
+                    } else {
+                        cout << "  ✗  Incorrect PIN. Account not closed.\n";
+                    }
+
+                } else if (accChoice == 7) {
+                    cout << "  ✓  Logged out successfully.\n";
+                    break;
+                } else {
+                    cout << "  ⚠  Invalid option.\n";
+                }
+            }
+
+        } else if (mainChoice == 3) {
+            cout << "\n  Thank you for using " << bank.getBankName() << ". Goodbye!\n\n";
+            break;
+        } else {
+            cout << "  ⚠  Invalid option. Try again.\n";
+        }
+    }
+
+    return 0;
+}
